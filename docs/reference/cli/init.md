@@ -354,12 +354,12 @@ rp1 init                                              Step 3 of 8
 | **Skip** | Exits successfully without making changes. |
 | **Reinitialize** | Performs fresh init but preserves `.rp1/context/` and `.rp1/work/` content. |
 
-### Monorepo Support
+### Monorepo Project Selection
 
-When running init in a subdirectory of a git repository:
+When running init inside a detected monorepo, you'll see an interactive project tree for selecting where to initialize rp1:
 
 ```bash
-cd my-monorepo/packages/my-package
+cd my-monorepo
 rp1 init
 ```
 
@@ -370,16 +370,31 @@ rp1 init                                              Step 2 of 8
 
   ✓ Loading tools registry
 
-  ? Checking git repository
-    └─ Not at repository root
-    └─ Current: /path/to/my-monorepo/packages/my-package
-    └─ Git root: /path/to/my-monorepo
+  ? Select a project to initialize rp1:
 
-    What would you like to do?
-    > Continue here (initialize this subdirectory)
-      Switch to git root
-      Cancel
+    [Turborepo detected at /path/to/my-monorepo]
+
+    Search: _
+
+      [root] my-monorepo              (not recommended)
+    > [package] apps/web              (recommended)
+      [package] apps/docs
+      [package] packages/ui
+      [package] packages/eslint-config
+
+    Selected: apps/web
+
+    Type to filter, arrows to navigate, Enter to select, Esc to cancel
 ```
+
+You can also run init from a specific package directory:
+
+```bash
+cd my-monorepo/packages/my-package
+rp1 init
+```
+
+The tree view will pre-select the current directory if it's a valid project.
 
 ### Multi-Tool Detection
 
@@ -404,6 +419,137 @@ Setup Status:
   ✓ .gitignore configured
   ✓ Plugins installed (Claude Code)
   ✓ Plugins installed (OpenCode - manual)
+```
+
+## Monorepo Support
+
+The init command provides intelligent detection and handling of monorepo structures, allowing you to initialize rp1 in specific projects within a larger repository.
+
+### Supported Monorepo Types
+
+rp1 automatically detects the following monorepo configurations:
+
+| Type | Detection Method | Config File |
+|------|------------------|-------------|
+| **npm Workspaces** | `workspaces` field in package.json | `package.json` |
+| **pnpm Workspaces** | pnpm-workspace.yaml file | `pnpm-workspace.yaml` |
+| **Yarn Workspaces** | `workspaces` field in package.json | `package.json` |
+| **Turborepo** | turbo.json presence | `turbo.json` |
+| **Nx** | nx.json presence | `nx.json` |
+| **Lerna** | lerna.json presence | `lerna.json` |
+| **Rush** | rush.json presence | `rush.json` |
+| **Cargo Workspaces** | `[workspace]` section in Cargo.toml | `Cargo.toml` |
+| **Go Modules** | Multiple go.mod files or go.work | `go.mod`, `go.work` |
+| **Gradle Multi-Project** | `include` statements in settings.gradle | `settings.gradle(.kts)` |
+| **Maven Multi-Module** | `<modules>` section in pom.xml | `pom.xml` |
+| **.NET Solutions** | Project references in .sln file | `*.sln` |
+
+**Detection Priority**: Tool-based configs (Turborepo, Nx, Lerna, Rush) take precedence over workspace configs (pnpm, npm), which take precedence over language-specific configs (Cargo, Go, Gradle, Maven, .NET).
+
+### Project Tree Navigation
+
+When a monorepo is detected, init displays an interactive tree view for project selection.
+
+#### Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| `Up`/`Down` | Move selection through projects |
+| `Enter` | Confirm selection and proceed with init |
+| `Escape` | Cancel and abort initialization |
+| `PageUp`/`PageDown` | Jump by 10 items |
+| `Ctrl+A`/`Ctrl+E` | Jump to first/last item |
+| Any character | Add to search filter |
+| `Backspace` | Remove last character from search |
+| `Ctrl+U` | Clear search filter |
+
+#### Fuzzy Search
+
+For monorepos with more than 10 projects, a search input is displayed. Type to filter projects by name or path:
+
+```
+Search: web_
+
+Showing 2 of 47 projects:
+
+> [package] apps/web              (recommended)
+  [package] packages/web-components
+```
+
+- Search is case-insensitive
+- Matches against both project name and full path
+- Empty search shows all projects
+
+#### Project Type Indicators
+
+| Indicator | Meaning |
+|-----------|---------|
+| `[root]` | Monorepo root directory |
+| `[package]` | Has package.json (JavaScript/TypeScript) |
+| `[crate]` | Has Cargo.toml (Rust) |
+| `[module]` | Has go.mod (Go) |
+| `[project]` | Has build.gradle, pom.xml, or *.csproj |
+| `[rp1]` | Already has .rp1/ initialized |
+
+#### Selection Recommendations
+
+The tree view provides guidance on where to initialize:
+
+- **`(recommended)`**: Shown on project-level directories (depth 1 from monorepo root). These are typically the best choice for focused knowledge bases.
+- **`(not recommended)`**: Shown on the monorepo root. Initializing at the root creates a knowledge base spanning all projects, which may dilute context.
+
+### Multi-Root .rp1/ Directories
+
+rp1 supports multiple independent `.rp1/` directories within a single monorepo. Each project can have its own:
+
+- Knowledge base (`.rp1/context/`)
+- Work artifacts (`.rp1/work/`)
+- Configuration
+
+**Example structure:**
+
+```
+my-monorepo/
+├── apps/
+│   ├── web/
+│   │   └── .rp1/           # Independent rp1 for web app
+│   └── api/
+│       └── .rp1/           # Independent rp1 for API
+├── packages/
+│   └── shared/
+│       └── .rp1/           # Independent rp1 for shared package
+└── package.json
+```
+
+**Benefits of multi-root:**
+
+- Focused knowledge bases for each project
+- Independent feature workflows per project
+- Teams can work on different projects without context overlap
+- Smaller, faster knowledge base builds
+
+**Visual indicator**: Projects with existing `.rp1/` directories show `[rp1]` in the tree view, so you can see which projects are already initialized.
+
+### Non-Interactive Monorepo Handling
+
+In non-interactive mode (`--yes` flag or non-TTY environment), monorepo detection still occurs:
+
+```bash
+rp1 init --yes
+```
+
+**Behavior:**
+
+- If current directory is a valid project within the monorepo: initializes there
+- If current directory is the monorepo root: shows a warning but proceeds
+- Detection failure: falls back to single-project mode
+
+**CI/CD Example:**
+
+```bash
+# Initialize specific package in CI
+cd my-monorepo/packages/my-package
+rp1 init --yes
 ```
 
 ## Non-Interactive Mode

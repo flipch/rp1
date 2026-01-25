@@ -100,6 +100,7 @@ rp1 init
 
 This interactive command will:
 
+- Detect monorepo structure and prompt for project selection (if applicable)
 - Create the `.rp1/` directory structure
 - Detect your AI assistant (Claude Code or OpenCode)
 - Inject rp1 instructions into `CLAUDE.md` or `AGENTS.md`
@@ -107,6 +108,26 @@ This interactive command will:
 - **Install plugins automatically** (for Claude Code)
 - Verify the installation
 - Display next steps
+
+??? tip "Working in a Monorepo?"
+    If rp1 detects a monorepo (npm workspaces, Turborepo, Cargo workspaces, etc.), you'll see an interactive project tree to choose where to initialize:
+
+    ```
+    ? Select a project to initialize rp1:
+
+      [Turborepo detected at /path/to/my-monorepo]
+
+        [root] my-monorepo              (not recommended)
+      > [package] apps/web              (recommended)
+        [package] apps/docs
+        [package] packages/ui
+
+      Type to filter, arrows to navigate, Enter to select, Esc to cancel
+    ```
+
+    **Tip**: Initialize at the project level (e.g., `apps/web`) rather than the monorepo root for focused, relevant knowledge bases. You can have multiple `.rp1/` directories in different projects within the same monorepo.
+
+    See [Monorepo Support](../reference/cli/init.md#monorepo-support) for full details on supported monorepo types and navigation.
 
 **Expected output:**
 
