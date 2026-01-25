@@ -846,6 +846,16 @@ export const useStepExecution = ({
 					case "git-check":
 						await executeGitCheck(addAct);
 						break;
+					case "monorepo-check":
+						// Monorepo detection is handled in the non-interactive flow (index.ts)
+						// In the interactive wizard, this step is a no-op for now
+						// TODO: Integrate ProjectTree component for interactive monorepo selection
+						addAct(
+							"monorepo-check",
+							"Monorepo detection (interactive not yet implemented)",
+							"info",
+						);
+						break;
 					case "reinit-check":
 						await executeReinitCheck(addAct);
 						break;

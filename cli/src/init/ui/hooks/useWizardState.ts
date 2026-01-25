@@ -106,6 +106,11 @@ export const WIZARD_STEPS: readonly Omit<
 		description: "Checking git repository",
 	},
 	{
+		id: "monorepo-check",
+		name: "Monorepo Check",
+		description: "Detecting monorepo structure",
+	},
+	{
 		id: "reinit-check",
 		name: "Reinit Check",
 		description: "Checking existing setup",

@@ -233,6 +233,7 @@ export interface ReinitState {
 export type StepId =
 	| "registry"
 	| "git-check"
+	| "monorepo-check"
 	| "reinit-check"
 	| "directory-setup"
 	| "tool-detection"

@@ -57,6 +57,7 @@ type PromptType = "git-root" | "reinit" | "gitignore" | null;
 const PROMPTABLE_STEPS: Record<StepId, PromptType> = {
 	registry: null,
 	"git-check": null, // Handled by step execution - only prompts if not at root
+	"monorepo-check": null, // Handled by step execution - shows ProjectTree if monorepo detected
 	"reinit-check": null, // Handled by step execution - only prompts if already configured
 	"directory-setup": null,
 	"tool-detection": null,

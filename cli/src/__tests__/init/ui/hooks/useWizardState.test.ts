@@ -74,6 +74,7 @@ describe("useWizardState", () => {
 			const expectedIds: StepId[] = [
 				"registry",
 				"git-check",
+				"monorepo-check",
 				"reinit-check",
 				"directory-setup",
 				"tool-detection",
@@ -111,14 +112,14 @@ describe("useWizardState", () => {
 		});
 
 		test("returns correct step for middle index", () => {
-			const state = createTestState({ currentStepIndex: 4 });
+			const state = createTestState({ currentStepIndex: 5 });
 			const current = getCurrentStep(state);
 
 			expect(current?.id).toBe("tool-detection");
 		});
 
 		test("returns last step for final index", () => {
-			const state = createTestState({ currentStepIndex: 10 });
+			const state = createTestState({ currentStepIndex: 11 });
 			const current = getCurrentStep(state);
 
 			expect(current?.id).toBe("summary");

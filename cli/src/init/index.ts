@@ -27,7 +27,9 @@ import {
 	type ContextDetectionResult,
 	detectProjectContext,
 } from "./context-detector.js";
+import { ensureDirectives } from "./directives.js";
 import { detectGitRoot, type GitRootResult } from "./git-root.js";
+import { ensureGitignore } from "./gitignore.js";
 import type {
 	GitignorePreset,
 	HealthReport,
@@ -41,6 +43,12 @@ import type {
 	ReinitState,
 } from "./models.js";
 import { GITIGNORE_PRESETS } from "./models.js";
+import {
+	detectMonorepo,
+	type MonorepoDetectionResult,
+	type ProjectNode,
+	scanProjects,
+} from "./monorepo/index.js";
 import { createProgress, type InitProgress } from "./progress.js";
 import {
 	appendShellFencedContent,
@@ -98,6 +106,7 @@ export interface InitContext {
 const INIT_STEPS = [
 	{ name: "registry", description: "Loading tools registry..." },
 	{ name: "git-check", description: "Checking git repository..." },
+	{ name: "monorepo-check", description: "Detecting monorepo structure..." },
 	{ name: "reinit-check", description: "Checking existing setup..." },
 	{ name: "directory-setup", description: "Setting up directory structure..." },
 	{ name: "tool-detection", description: "Detecting agentic tools..." },
@@ -266,6 +275,270 @@ async function handleGitRootCheck(
 		case "cancel":
 			return { proceed: false, cwd: gitResult.currentDir };
 	}
+}
+
+/**
+ * Result of monorepo check operation.
+ */
+interface MonorepoCheckResult {
+	readonly proceed: boolean;
+	readonly cwd: string;
+	readonly warning?: string;
+	readonly monorepoDetected: boolean;
+	readonly monorepoType: string | null;
+}
+
+/**
+ * Format a project node for selection display.
+ */
+function formatProjectChoice(
+	node: ProjectNode,
+	isRoot: boolean,
+	currentDir: string,
+): { value: string; name: string; description: string } {
+	const isCurrent = node.path === currentDir;
+	const indicator = isRoot
+		? "[root]"
+		: node.type === "package.json"
+			? "[package]"
+			: node.type === "Cargo.toml"
+				? "[crate]"
+				: node.type === "go.mod"
+					? "[module]"
+					: "[project]";
+
+	const recommendation = isRoot
+		? " (not recommended)"
+		: node.depth === 1
+			? " (recommended)"
+			: "";
+
+	const currentMarker = isCurrent ? " [current]" : "";
+	const rp1Marker = node.hasRp1 ? " [rp1 initialized]" : "";
+
+	return {
+		value: node.path,
+		name: `${indicator} ${isRoot ? "(monorepo root)" : node.relativePath}${recommendation}${currentMarker}${rp1Marker}`,
+		description: isRoot
+			? "Initialize at the monorepo root (advanced)"
+			: `Initialize rp1 in ${node.relativePath}`,
+	};
+}
+
+/**
+ * Flatten project tree to list for selection.
+ */
+function flattenProjectTree(
+	nodes: readonly ProjectNode[],
+	monorepoRoot: string,
+): Array<{ node: ProjectNode; isRoot: boolean }> {
+	const result: Array<{ node: ProjectNode; isRoot: boolean }> = [];
+
+	// Add root as first entry
+	result.push({
+		node: {
+			path: monorepoRoot,
+			relativePath: ".",
+			name: ".",
+			type: "directory",
+			hasRp1: false,
+			depth: 0,
+			children: [],
+		},
+		isRoot: true,
+	});
+
+	const traverse = (items: readonly ProjectNode[]): void => {
+		for (const node of items) {
+			result.push({ node, isRoot: false });
+			if (node.children.length > 0) {
+				traverse(node.children);
+			}
+		}
+	};
+
+	traverse(nodes);
+	return result;
+}
+
+/**
+ * Handle monorepo detection and project selection.
+ *
+ * Flow:
+ * 1. Always checks for monorepo at git root (regardless of current directory)
+ * 2. Interactive mode: Shows ProjectTree when monorepo detected
+ * 3. Non-interactive mode: Uses current directory with warning when monorepo detected
+ * 4. Shows "(recommended)" badge on project-level directories
+ * 5. Shows "(monorepo root - not recommended)" warning on root selection
+ * 6. Pre-selects current directory if it matches a project
+ * 7. Calls ensureGitignore and ensureDirectives after project selection
+ * 8. Allows cancellation to abort init (Escape)
+ * 9. Selected path becomes cwd for remaining init flow
+ */
+async function handleMonorepoCheck(
+	gitResult: GitRootResult,
+	currentCwd: string,
+	promptOptions: PromptOptions,
+	logger: Logger,
+	progress: InitProgress,
+): Promise<MonorepoCheckResult> {
+	// If not in a git repo, skip monorepo detection
+	if (!gitResult.isGitRepo || !gitResult.gitRoot) {
+		logger.debug("Not in a git repository, skipping monorepo detection");
+		return {
+			proceed: true,
+			cwd: currentCwd,
+			monorepoDetected: false,
+			monorepoType: null,
+		};
+	}
+
+	// Always check for monorepo at git root
+	const gitRoot = gitResult.gitRoot;
+	logger.debug(`Checking for monorepo at git root: ${gitRoot}`);
+
+	const detectionResult = await detectMonorepo(gitRoot)();
+	if (detectionResult._tag === "Left") {
+		// Detection failed - continue without monorepo support
+		logger.debug("Monorepo detection failed, continuing as single-project");
+		return {
+			proceed: true,
+			cwd: currentCwd,
+			monorepoDetected: false,
+			monorepoType: null,
+		};
+	}
+
+	const detection: MonorepoDetectionResult = detectionResult.right;
+
+	// No monorepo detected - continue with standard flow
+	if (!detection.detected) {
+		logger.debug("No monorepo structure detected");
+		return {
+			proceed: true,
+			cwd: currentCwd,
+			monorepoDetected: false,
+			monorepoType: null,
+		};
+	}
+
+	logger.info(`Detected ${detection.type} monorepo at ${gitRoot}`);
+
+	// Scan for projects
+	const projectsResult = await scanProjects(detection)();
+	if (projectsResult._tag === "Left") {
+		logger.debug("Project scanning failed, continuing with current directory");
+		return {
+			proceed: true,
+			cwd: currentCwd,
+			monorepoDetected: true,
+			monorepoType: detection.type,
+		};
+	}
+
+	const projects = projectsResult.right;
+
+	// If no projects found, continue with current directory
+	if (projects.length === 0) {
+		logger.debug(
+			"No projects found in monorepo, continuing with current directory",
+		);
+		return {
+			proceed: true,
+			cwd: currentCwd,
+			monorepoDetected: true,
+			monorepoType: detection.type,
+		};
+	}
+
+	// Non-interactive mode: Use current directory with warning
+	if (!promptOptions.isTTY) {
+		const warning = `Monorepo detected (${detection.type}). Using current directory in non-interactive mode.`;
+		logger.warn(warning);
+		logger.info("Run interactively to select a specific project.");
+		return {
+			proceed: true,
+			cwd: currentCwd,
+			warning,
+			monorepoDetected: true,
+			monorepoType: detection.type,
+		};
+	}
+
+	// Interactive mode: Show project selection
+	progress.pauseStep();
+
+	// Flatten tree for selection
+	const flattenedProjects = flattenProjectTree(projects, gitRoot);
+
+	// Build selection options
+	const options = flattenedProjects.map(({ node, isRoot }) =>
+		formatProjectChoice(node, isRoot, currentCwd),
+	);
+
+	// Add cancel option
+	options.push({
+		value: "__cancel__",
+		name: "Cancel",
+		description: "Abort initialization",
+	});
+
+	logger.info(`\nMonorepo contains ${projects.length} projects:`);
+
+	const choice = await selectOption(
+		`Select a project to initialize rp1 (${detection.type} detected):`,
+		options,
+		promptOptions,
+	);
+
+	// Handle cancellation (null from selectOption or explicit cancel)
+	if (choice === null || choice === "__cancel__") {
+		return {
+			proceed: false,
+			cwd: currentCwd,
+			monorepoDetected: true,
+			monorepoType: detection.type,
+		};
+	}
+
+	const selectedPath = choice;
+
+	// Warn if selecting monorepo root
+	if (selectedPath === gitRoot) {
+		logger.warn(
+			"Selecting monorepo root is not recommended. Consider initializing in a specific project.",
+		);
+	}
+
+	logger.success(`Selected: ${selectedPath}`);
+
+	// Call ensureGitignore after project selection
+	logger.debug("Ensuring .gitignore is configured...");
+	const gitignoreResult = await ensureGitignore(selectedPath)();
+	if (gitignoreResult._tag === "Left") {
+		logger.warn(
+			`Failed to configure .gitignore: ${gitignoreResult.left.message}`,
+		);
+	}
+
+	// Call ensureDirectives after project selection
+	logger.debug("Ensuring directives are configured...");
+	const directivesResult = await ensureDirectives(selectedPath)();
+	if (directivesResult._tag === "Left") {
+		logger.warn(
+			`Failed to configure directives: ${directivesResult.left.message}`,
+		);
+	} else {
+		const result = directivesResult.right;
+		logger.debug(`Directives ${result.action} in ${result.file}`);
+	}
+
+	return {
+		proceed: true,
+		cwd: selectedPath,
+		monorepoDetected: true,
+		monorepoType: detection.type,
+	};
 }
 
 /**
@@ -673,15 +946,16 @@ async function configureGitignore(
  * 1. TTY detection
  * 2. Load tools registry
  * 3. Git root detection and handling
- * 4. Re-initialization detection and handling
- * 5. Directory structure creation
- * 6. Tool detection
- * 7. Instruction file injection
- * 8. Gitignore configuration
- * 9. Plugin installation (actual execution)
- * 10. Plugin verification
- * 11. Health check
- * 12. Summary display
+ * 4. Monorepo detection and project selection
+ * 5. Re-initialization detection and handling
+ * 6. Directory structure creation
+ * 7. Tool detection
+ * 8. Instruction file injection
+ * 9. Gitignore configuration
+ * 10. Plugin installation (actual execution)
+ * 11. Plugin verification
+ * 12. Health check
+ * 13. Summary display
  *
  * @param options - Init options from CLI
  * @param logger - Logger instance
@@ -739,9 +1013,38 @@ export function executeInit(
 					};
 				}
 
-				const cwd = gitCheck.cwd;
+				let cwd = gitCheck.cwd;
 				if (gitCheck.warning) {
 					allWarnings.push(gitCheck.warning);
+				}
+
+				// Monorepo detection step
+				progress.startStep("monorepo-check");
+				const monorepoCheck = await handleMonorepoCheck(
+					gitResult,
+					cwd,
+					promptOptions,
+					logger,
+					progress,
+				);
+				progress.completeStep();
+
+				if (!monorepoCheck.proceed) {
+					return {
+						actions: [
+							{ type: "skipped", reason: "User cancelled monorepo selection" },
+						],
+						detectedTool: null,
+						warnings: [],
+						healthReport: null,
+						nextSteps: [],
+					};
+				}
+
+				// Update cwd if a different project was selected in monorepo
+				cwd = monorepoCheck.cwd;
+				if (monorepoCheck.warning) {
+					allWarnings.push(monorepoCheck.warning);
 				}
 
 				const contextResultEither = await detectProjectContext(cwd)();
