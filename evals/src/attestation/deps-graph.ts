@@ -14,6 +14,12 @@ import type { DependencyGraph } from "./types.js";
 const TASK_PATTERN = /Task:\s*(\w+-\w+):(\w[\w-]*)/g;
 
 /**
+ * Pattern for detecting subagent_type references in command files.
+ * Matches: subagent_type: plugin:agent-name
+ */
+const SUBAGENT_PATTERN = /subagent_type:\s*(\w+-\w+):(\w[\w-]*)/g;
+
+/**
  * Pattern for detecting skill references in agent files.
  * Matches: skill: rp1-base:skill-name, skill `rp1-dev:skill-name`, Skill rp1-base:skill-name
  */
@@ -42,11 +48,13 @@ export const PLUGIN_SUFFIXES = Object.keys(PLUGIN_PATHS).map((k) =>
 export function parseAgentRefs(content: string): readonly string[] {
 	const refs: string[] = [];
 
-	for (const match of content.matchAll(TASK_PATTERN)) {
-		const [, plugin, agent] = match;
-		const basePath = PLUGIN_PATHS[plugin];
-		if (basePath) {
-			refs.push(`${basePath}/agents/${agent}.md`);
+	for (const pattern of [TASK_PATTERN, SUBAGENT_PATTERN]) {
+		for (const match of content.matchAll(pattern)) {
+			const [, plugin, agent] = match;
+			const basePath = PLUGIN_PATHS[plugin];
+			if (basePath) {
+				refs.push(`${basePath}/agents/${agent}.md`);
+			}
 		}
 	}
 

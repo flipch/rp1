@@ -1,0 +1,1 @@
+/rp1-base:deep-research "{{RESEARCH_TOPIC}}"

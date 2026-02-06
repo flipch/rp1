@@ -1,0 +1,122 @@
+# deep-research Command Evaluation Suite
+#
+# Tests the /rp1-base:deep-research command behavior
+#
+# Run: just run-evals rp1-base/deep-research
+description: "rp1-base:deep-research instruction-following evaluation"
+evaluateOptions:
+  maxConcurrency: 4
+extensions:
+  - file://../../shared/extension.ts:extensionHook
+providers:
+  - id: file://../../../providers/claude-with-tools.ts
+    label: rp1-agentic-eval
+    config:
+      model: claude-opus-4-5
+      # working_dir is set dynamically by extension via WORKSPACE_DIR var
+      # This enables parallel test execution with isolated workspaces
+      permission_mode: bypassPermissions
+      allow_dangerously_skip_permissions: true
+      ask_user_question:
+        behavior: first_option
+      max_turns: 50
+      setting_sources:
+        - project
+        - local
+        - user
+      tools:
+        - Read
+        - Write
+        - Edit
+        - Glob
+        - Grep
+        - Bash
+        - Skill
+        - WebSearch
+        - WebFetch
+prompts:
+  - file://prompt.txt
+defaultTest:
+  options:
+    provider:
+      id: "anthropic:claude-haiku-4-5-20251001"
+      config:
+        temperature: 0
+  vars:
+    RESEARCH_TOPIC: "Understand the architecture and key design patterns in this project"
+tests:
+  - description: "default_codebase_research"
+    assert:
+      - type: llm-rubric
+        value: |
+          Evaluate the agent execution for a codebase research task. Check the output text AND the Metadata JSON section.
+
+          REQUIRED (all must pass):
+          1. Agent spawns research-explorer subagent(s) for codebase exploration - Metadata toolCalls should contain Task tool calls with "research-explorer" in the prompt/name
+          2. Agent spawns research-reporter subagent for report generation - Metadata toolCalls should contain Task tool call with "research-reporter" in the prompt/name
+          3. Output contains "Research Complete" section (or similarly titled final summary)
+          4. Output includes key findings summary (2-3 sentences about what was discovered)
+          5. Output includes report path pointing to {RP1_ROOT}/work/research/ directory with .md extension
+          6. Output includes methodology section mentioning explorers spawned and files explored
+          7. Agent does NOT ask clarification questions for this clear research request (it's specific enough)
+          8. Multiple explorers are spawned in PARALLEL (multiple Task tool calls in same message)
+
+          PROHIBITED (fail if any present):
+          - Agent attempting to write code or modify source files
+          - Agent skipping explorer phase and doing all research directly
+          - Agent asking more than 1 clarification question for this clear topic
+          - "git push" or "git commit" in Metadata bashCommands (research should not modify repo)
+
+          PASS if: Explorers spawned, report generated, final summary output with report path
+          FAIL if: Missing explorer or reporter phases, no report path, or agent does research itself without delegation
+  - description: "ambiguous_topic_clarification"
+    vars:
+      RESEARCH_TOPIC: "Research this code"
+    assert:
+      - type: llm-rubric
+        value: |
+          Evaluate whether the agent correctly identifies an ambiguous research request and asks for clarification.
+
+          Check the output text AND the Metadata JSON section.
+
+          REQUIRED (all must pass):
+          1. Agent recognizes the request is ambiguous ("Research this code" lacks specifics)
+          2. Agent asks a clarification question via AskUserQuestion - Metadata toolCalls should contain an AskUserQuestion call
+          3. After receiving clarification response, agent proceeds with the research workflow
+          4. Agent eventually spawns research-explorer subagent(s)
+          5. Agent eventually spawns research-reporter subagent for report generation
+          6. Output contains final summary with report path
+
+          PROHIBITED:
+          - Agent proceeding directly to exploration without any clarification
+          - Agent asking more than 1 round of clarification questions
+          - Agent refusing to proceed after clarification
+
+          PASS if: Asks clarification, then completes full research workflow
+          FAIL if: Skips clarification entirely or gets stuck in clarification loop
+  - description: "web_research_topic"
+    vars:
+      RESEARCH_TOPIC: "Research best practices for implementing rate limiting in REST APIs, comparing token bucket vs sliding window approaches"
+    assert:
+      - type: llm-rubric
+        value: |
+          Evaluate the agent execution for a technical investigation topic requiring web research.
+
+          Check the output text AND the Metadata JSON section.
+
+          REQUIRED (all must pass):
+          1. Agent identifies this as a technical-investigation requiring web research
+          2. Agent spawns at least one explorer with web or hybrid exploration type
+          3. Metadata toolCalls or bashCommands should show WebSearch or WebFetch usage (either directly or through subagents)
+          4. Agent spawns research-reporter for report generation
+          5. Output contains final summary with findings about rate limiting approaches
+          6. Output includes report path to generated report file
+          7. Agent does NOT ask clarification (topic is specific and clear)
+
+          PROHIBITED:
+          - Agent only doing codebase exploration for a web-focused topic
+          - Agent skipping web research entirely
+          - "git push" or "git commit" in Metadata bashCommands
+
+          PASS if: Web exploration performed, findings about rate limiting included, report generated
+          FAIL if: No web research performed or topic-relevant findings missing
