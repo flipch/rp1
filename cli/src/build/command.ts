@@ -679,7 +679,6 @@ export const buildCodexPlugin = async (
 		spinner.start(`Building ${pluginName} plugin (codex)...`);
 	}
 
-	// Process skills
 	const skillsDir = join(pluginDir, "skills");
 	const skillDirs = await getSkillDirs(skillsDir);
 
@@ -728,7 +727,6 @@ export const buildCodexPlugin = async (
 		await mkdir(skillOutputDir, { recursive: true });
 		await writeFile(join(skillOutputDir, "SKILL.md"), namespacedSkillMdContent);
 
-		// Generate agents/openai.yaml
 		const yamlResult = generateOpenaiYaml(namespacedSkillDir);
 		if (E.isRight(yamlResult)) {
 			const agentsDir = join(skillOutputDir, "agents");
@@ -736,13 +734,11 @@ export const buildCodexPlugin = async (
 			await writeFile(join(agentsDir, "openai.yaml"), yamlResult.right);
 		}
 
-		// Copy supporting files
 		await copySupportingFiles(skillDir, skillOutputDir, supportingFiles);
 
 		skillNames.push(namespacedSkillDir);
 	}
 
-	// Process agents
 	const agentsDir = join(pluginDir, "agents");
 	const agentFiles = await getMarkdownFiles(agentsDir);
 	const codexAgents: CodexAgent[] = [];
@@ -765,7 +761,6 @@ export const buildCodexPlugin = async (
 		agentNames.push(codexAgent.name);
 	}
 
-	// Generate rp1-agents.toml
 	if (codexAgents.length > 0) {
 		const tomlResult = generateAgentToml(codexAgents);
 		if (E.isRight(tomlResult)) {
@@ -784,7 +779,6 @@ export const buildCodexPlugin = async (
 		}
 	}
 
-	// Generate AGENTS.md
 	if (codexAgents.length > 0) {
 		const agentsMdResult = generateCodexAgentsMd(pluginName, codexAgents);
 		if (E.isRight(agentsMdResult)) {
@@ -794,7 +788,6 @@ export const buildCodexPlugin = async (
 		}
 	}
 
-	// Generate manifest.json
 	const manifestResult = generateCodexManifest(
 		`rp1-${pluginName}`,
 		pluginVersion,
@@ -842,7 +835,6 @@ const printSummary = (
 	const pluginCol = 12;
 	const numCol = 10;
 
-	// OpenCode summary
 	if (summaries.length > 0) {
 		console.log(bold("OpenCode"));
 		console.log(
@@ -863,7 +855,6 @@ const printSummary = (
 		console.log(`Output: ${cyan(resolve(outputPath))}`);
 	}
 
-	// Codex summary
 	if (codexSummaries && codexSummaries.length > 0) {
 		console.log(`\n${bold("Codex")}`);
 		console.log(
@@ -886,7 +877,6 @@ const printSummary = (
 		}
 	}
 
-	// Show errors if any (from both platforms)
 	const allErrors = [
 		...summaries.flatMap((s) => s.errors),
 		...(codexSummaries ?? []).flatMap((s) => s.errors),
@@ -935,7 +925,6 @@ export const executeBuild = (
 							? ["base", "dev", "utils"]
 							: [config.plugin];
 
-					// Build OpenCode artifacts
 					const summaries: BuildSummary[] = [];
 					const pluginAssets: Map<string, BundlePluginAssets> = new Map();
 
@@ -992,7 +981,7 @@ export const executeBuild = (
 								const pkg = JSON.parse(await readFile(pkgPath, "utf-8"));
 								version = pkg.version ?? "0.0.0";
 							} catch {
-								// Fallback
+								// version defaults to "0.0.0"
 							}
 
 							const bundleManifestResult = generateBundleManifest(
